@@ -1,0 +1,13 @@
+from microbit import *
+import radio
+
+quantite_lait = 0
+
+radio.on()
+while True:
+    if button_a.was_pressed():
+        display.scroll("Lait: " + str(quantite_lait), delay=150, wait=False)
+    if button_b.was_pressed():
+        quantite_lait = 0
+        display.show("0")
+        sleep(1000)
