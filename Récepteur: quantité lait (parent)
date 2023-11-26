@@ -1,13 +1,16 @@
 from microbit import *
 import radio
+radio.config(group=17)
 
 quantite_lait = 0
 
 radio.on()
 while True:
-    if button_a.was_pressed():
+    if radio.receive():
+        quantite_lait = radio.receive()
+    if button_a.is_pressed():
         display.scroll("Lait: " + str(quantite_lait), delay=150, wait=False)
-    if button_b.was_pressed():
+    if button_b.is_pressed():
         quantite_lait = 0
         display.show("0")
         sleep(1000)
