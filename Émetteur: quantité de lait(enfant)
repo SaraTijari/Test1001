@@ -1,5 +1,6 @@
 from microbit import *
 import radio
+radio.config(group=17)
 
 quantite_lait = 0
 
