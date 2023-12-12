@@ -1,0 +1,242 @@
+from microbit import *
+import radio
+import random
+import music
+
+#Can be used to filter the communication, only the ones with the same parameters will receive messages
+#radio.config(group=23, channel=2, address=0x11111111)
+#default : channel=7 (0-83), address = 0x75626974, group = 0 (0-255)
+radio.on()
+connexion_established = False
+key = "LARDON"
+connexion_key = None
+nonce_list = set()
+baby_state = 0
+set_volume(100)
+
+
+def hashing(string):
+	"""
+	Hachage d'une chaîne de caractères fournie en paramètre.
+	Le résultat est une chaîne de caractères.
+	Attention : cette technique de hachage n'est pas suffisante (hachage dit cryptographique) pour une utilisation en dehors du cours.
+
+	:param (str) string: la chaîne de caractères à hacher
+	:return (str): le résultat du hachage
+	"""
+	def to_32(value):
+		"""
+		Fonction interne utilisée par hashing.
+		Convertit une valeur en un entier signé de 32 bits.
+		Si 'value' est un entier plus grand que 2 ** 31, il sera tronqué.
+
+		:param (int) value: valeur du caractère transformé par la valeur de hachage de cette itération
+		:return (int): entier signé de 32 bits représentant 'value'
+		"""
+		value = value % (2 ** 32)
+		if value >= 2**31:
+			value = value - 2 ** 32
+		value = int(value)
+		return value
+
+	if string:
+		x = ord(string[0]) << 7
+		m = 1000003
+		for c in string:
+			x = to_32((x*m) ^ ord(c))
+		x ^= len(string)
+		if x == -1:
+			x = -2
+		return str(x)
+	return ""
+    
+def vigenere(message, key, decryption=False):
+    text = ""
+    key_length = len(key)
+    key_as_int = [ord(k) for k in key]
+
+    for i, char in enumerate(str(message)):
+        key_index = i % key_length
+        #Letters encryption/decryption
+        if char.isalpha():
+            if decryption:
+                modified_char = chr((ord(char.upper()) - key_as_int[key_index] + 26) % 26 + ord('A'))
+            else : 
+                modified_char = chr((ord(char.upper()) + key_as_int[key_index] - 26) % 26 + ord('A'))
+            #Put back in lower case if it was
+            if char.islower():
+                modified_char = modified_char.lower()
+            text += modified_char
+        #Digits encryption/decryption
+        elif char.isdigit():
+            if decryption:
+                modified_char = str((int(char) - key_as_int[key_index]) % 10)
+            else:  
+                modified_char = str((int(char) + key_as_int[key_index]) % 10)
+            text += modified_char
+        else:
+            text += char
+    return text
+    
+def send_packet(key, type, content):
+    """
+    Envoi de données fournies en paramètres
+    Cette fonction permet de construire, de chiffrer puis d'envoyer un paquet via l'interface radio du micro:bit
+
+    :param (str) key:       Clé de chiffrement
+           (str) type:      Type du paquet à envoyer
+           (str) content:   Données à envoyer
+	:return none
+    """
+    nonce=random.randint(0,1000)
+    length=len(str(nonce))+len(content)+1
+    message=(str(type)+'|'+str(length)+'|'+str(nonce)+':'+str(content))
+
+    print(content)
+    print(vigenere(message,key,decryption=False))
+
+    
+    radio.send(vigenere(message,key,decryption=False))
+    
+    
+    
+
+#Unpack the packet, check the validity and return the type, length and content
+def unpack_data(encrypted_packet, key):
+    """
+    Déballe et déchiffre les paquets reçus via l'interface radio du micro:bit
+    Cette fonction renvoit les différents champs du message passé en paramètre
+
+    :param (str) encrypted_packet: Paquet reçu
+           (str) key:              Clé de chiffrement
+	:return (srt)type:             Type de paquet
+            (int)length:           Longueur de la donnée en caractères
+            (str) message:         Données reçue
+    """
+    decrypted_packet = vigenere(encrypted_packet, key, decryption=True)
+    champs = decrypted_packet.split('|')
+    type = champs[0]
+    length = champs[1]
+    message = champs[2]
+    return str(type),int(length),str(message)
+    
+    
+
+    
+
+def receive_packet(packet_received, key):
+    """
+    Traite les paquets reçus via l'interface radio du micro:bit
+    Cette fonction utilise la fonction unpack_data pour renvoyer les différents champs du message passé en paramètre
+    Si une erreur survient, les 3 champs sont retournés vides
+
+    :param (str) packet_received: Paquet reçue
+           (str) key:              Clé de chiffrement
+	:return (srt)type:             Type de paquet
+            (int)lenght:           Longueur de la donnée en caractère
+            (str) message:         Données reçue
+    """
+    message_received=unpack_data(packet_received, key)
+    print(message_received)
+    type,length,message=message_received
+    msg = message.split(':')
+    print(msg)
+    
+    nonce=msg[0]
+    if nonce in nonce_list:
+        return None, None, None
+    else:
+        nonce_list.add(nonce)
+        return type,length,msg[1]
+    
+    
+#Calculate the challenge response
+def calculate_challenge_response(challenge):
+    """
+    Calcule la réponse au challenge initial de connection avec l'autre micro:bit
+
+    :param (str) challenge:            Challenge reçu
+	:return (srt)challenge_response:   Réponse au challenge
+    """
+    random.seed(int(challenge))
+    response_chal = random.random()
+    return str(response_chal)
+    
+#Ask for a new connection with a micro:bit of the same group
+def establish_connexion(key):
+    """
+    Etablissement de la connexion avec l'autre micro:bit
+    Si il y a une erreur, la valeur de retour est vide
+
+    :param (str) key:                  Clé de chiffrement
+	:return (srt)challenge_response:   Réponse au challenge
+    """
+    
+    challenge = "26628723"
+    send_packet(key, "0*01", challenge)
+    return calculate_challenge_response(challenge)
+
+def response_is_correct(key):
+    send_packet(key, "0*05", "none")
+
+		
+def main():
+    type = 0
+    radio.config(group=42, power=7)
+    
+    sleep(1000)
+    audio.play(Sound.HAPPY, wait=False)
+    audio.play(Sound.GIGGLE, wait=False)
+    display.scroll('Enfant', delay=25)
+    sleep(1000)
+
+    key = "LARDON"
+    chal_response = establish_connexion(key)
+
+    while True:
+
+        type = 0
+        while True:
+            packet_received = radio.receive()
+            if packet_received:
+                
+                type,length,message = receive_packet(packet_received, key)
+                break
+            
+            
+        
+        if type == "0x01" :										#connexion
+                
+            if hashing(str(chal_response)) == message:
+                send_packet(key, "0x05", "none")
+                key+=str(chal_response)
+                
+                
+        
+                    
+        if type == "0x02" :
+            x=0
+            for i in range (10):
+                sleep(1000)
+                if accelerometer.was_gesture('shake'):
+                        x += 1
+            if x == 0:
+                send_packet(key, "0x03", "0")
+            elif x<5:
+                send_packet(key, "0x03", "1")
+            else :
+                send_packet(key, "0x03", "2")
+                    
+        if type == "0x03" :
+            print(str(temperature()))
+            send_packet(key, "0x02", str(temperature()))
+            
+        if type == "0x04" :
+	    display.scroll(message)
+		
+        if pin_logo.is_touched():
+            return True
+    
+
+main()
+
